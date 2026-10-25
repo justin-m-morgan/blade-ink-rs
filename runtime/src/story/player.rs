@@ -9,7 +9,10 @@ use crate::{
     choice::Choice,
     compat::collections::{HashMap, HashSet},
     compat::io::{Read, Write},
-    compat::{cell::RefCell, rc::Rc},
+    compat::{
+        lock::{Lock, LockExt},
+        rc::Rc,
+    },
     ink_list::InkList,
     runtime::Runtime,
     story::error::StoryError,
@@ -48,12 +51,12 @@ pub struct Story {
     observers: HashMap<VariableObserverHandle, Box<dyn VariableObserver>>,
     subscriptions: HashMap<String, Vec<VariableObserverHandle>>,
     next_observer_id: u64,
-    on_error: Option<Rc<RefCell<dyn ErrorHandler>>>,
+    on_error: Option<Rc<Lock<dyn ErrorHandler>>>,
     errors: Vec<String>,
     warnings: Vec<String>,
     time_source: Option<Rc<dyn TimeSource>>,
     last_time: Option<core::time::Duration>,
-    choice_cache: RefCell<Option<Vec<Rc<Choice>>>>,
+    choice_cache: Lock<Option<Vec<Rc<Choice>>>>,
     externals_validated: bool,
 }
 
@@ -163,7 +166,7 @@ impl Story {
             warnings: Vec::new(),
             time_source: Self::default_time_source(),
             last_time: None,
-            choice_cache: RefCell::new(None),
+            choice_cache: Lock::new(None),
             externals_validated: false,
         };
         if version != INK_VERSION_CURRENT {
@@ -222,7 +225,7 @@ impl Story {
             self.runtime.validate_external_bindings()?;
             self.externals_validated = true;
         }
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         let mut last_time = self.last_time;
         let start = if millisecs_limit_async > 0.0 {
             let now = self.time_source.as_ref().unwrap().now();
@@ -256,7 +259,7 @@ impl Story {
                 self.notify_changed_variables()?;
                 if let Some(handler) = &self.on_error {
                     for warning in &self.warnings {
-                        handler.borrow_mut().error(warning, ErrorType::Warning);
+                        handler.lock_mut().error(warning, ErrorType::Warning);
                     }
                 }
                 self.warnings.clear();
@@ -277,7 +280,7 @@ impl Story {
                 self.errors.push(message.clone());
                 self.runtime.force_end();
                 if let Some(handler) = &self.on_error {
-                    handler.borrow_mut().error(&message, ErrorType::Error);
+                    handler.lock_mut().error(&message, ErrorType::Error);
                     self.errors.clear();
                     return Ok(());
                 }
@@ -352,13 +355,13 @@ impl Story {
             return Vec::new();
         }
         self.choice_cache
-            .borrow_mut()
+            .lock_mut()
             .get_or_insert_with(|| self.runtime.public_choices())
             .clone()
     }
 
     /// Assigns a handler for runtime diagnostics.
-    pub fn set_error_handler(&mut self, handler: Rc<RefCell<dyn ErrorHandler>>) {
+    pub fn set_error_handler(&mut self, handler: Rc<Lock<dyn ErrorHandler>>) {
         self.on_error = Some(handler);
     }
 
@@ -385,7 +388,7 @@ impl Story {
     /// Chooses a visible choice by its current index.
     pub fn choose_choice_index(&mut self, index: usize) -> Result<(), StoryError> {
         self.if_async_we_cant("choose a choice")?;
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.choose_choice_index(index)
     }
 
@@ -397,7 +400,7 @@ impl Story {
         args: Option<&Vec<ValueType>>,
     ) -> Result<(), StoryError> {
         self.if_async_we_cant("call ChoosePathString right now")?;
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime
             .choose_path_string_with_arguments(path, reset_call_stack, args)
     }
@@ -450,7 +453,7 @@ impl Story {
         text_output: &mut String,
     ) -> Result<Option<ValueType>, StoryError> {
         self.if_async_we_cant("evaluate a function")?;
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         let value = self.runtime.evaluate_function(name, args, text_output)?;
         self.notify_changed_variables()?;
         Ok(value)
@@ -566,7 +569,7 @@ impl Story {
     /// Resets execution state while retaining the static arena and bindings.
     pub fn reset_state(&mut self) -> Result<(), StoryError> {
         self.if_async_we_cant("reset state")?;
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         #[cfg(feature = "std")]
         let seed = self
             .fixed_seed
@@ -579,20 +582,20 @@ impl Story {
     /// Selects or creates a named flow.
     pub fn switch_flow(&mut self, name: &str) -> Result<(), StoryError> {
         self.if_async_we_cant("switch flow")?;
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.switch_flow(name);
         Ok(())
     }
 
     /// Removes a named flow.
     pub fn remove_flow(&mut self, name: &str) -> Result<(), StoryError> {
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.remove_flow(name)
     }
 
     /// Returns to the default flow.
     pub fn switch_to_default_flow(&mut self) {
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.switch_to_default_flow();
     }
 
@@ -677,7 +680,7 @@ impl Story {
     /// Loads a state written by this runtime or the existing Ink runtime.
     #[cfg(any(feature = "stream-json-parser", feature = "binary-image"))]
     pub fn load_state_from_reader(&mut self, reader: impl Read) -> Result<(), StoryError> {
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.load_state_from_reader(reader)
     }
 
@@ -687,7 +690,7 @@ impl Story {
         feature = "serde-json-parser"
     ))]
     pub fn load_state_from_reader(&mut self, mut reader: impl Read) -> Result<(), StoryError> {
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         let mut saved = String::new();
         reader.read_to_string(&mut saved)?;
         self.runtime.load_state_json(&saved)
@@ -695,7 +698,7 @@ impl Story {
 
     /// Loads a state written by this runtime or the existing Ink runtime.
     pub fn load_state(&mut self, saved: &str) -> Result<(), StoryError> {
-        self.choice_cache.borrow_mut().take();
+        self.choice_cache.lock_mut().take();
         self.runtime.load_state_json(saved)
     }
 }
@@ -819,6 +822,8 @@ mod tests {
 
     #[test]
     fn story_reports_runtime_error_to_handler() {
+        use crate::compat::cell::RefCell;
+
         struct Capture(Rc<RefCell<Vec<String>>>);
         impl ErrorHandler for Capture {
             fn error(&mut self, message: &str, error_type: ErrorType) {
@@ -830,7 +835,7 @@ mod tests {
         let json = r#"{"inkVersion":21,"root":["^unfinished",null],"listDefs":{}}"#;
         let mut story = Story::new_with_seed(json, 1).unwrap();
         let messages = Rc::new(RefCell::new(Vec::new()));
-        story.set_error_handler(Rc::new(RefCell::new(Capture(messages.clone()))));
+        story.set_error_handler(Rc::new(Lock::new(Capture(messages.clone()))));
         assert_eq!(story.cont().unwrap(), "unfinished");
         assert!(!story.can_continue());
         assert!(!story.has_error());

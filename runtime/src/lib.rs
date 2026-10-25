@@ -86,6 +86,41 @@ mod compat {
         pub use core3::io::*;
     }
 
+    /// Exclusive access that blocks on contention instead of panicking, for
+    /// state reached through `&self` or shared with the caller. It is
+    /// `RefCell` by default and `std::sync::Mutex` with the `sync` feature.
+    pub mod lock {
+        use core::ops::DerefMut;
+
+        #[cfg(not(feature = "sync"))]
+        pub use core::cell::RefCell as Lock;
+        #[cfg(feature = "sync")]
+        pub use std::sync::Mutex as Lock;
+
+        /// Exclusive access to a [`Lock`], whichever type it is.
+        pub trait LockExt<T: ?Sized> {
+            /// Borrows the value mutably. Without `sync` this panics if it
+            /// is already borrowed; with `sync` it waits for the lock, and
+            /// ignores poisoning left by a panic in another thread.
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_;
+        }
+
+        #[cfg(not(feature = "sync"))]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.borrow_mut()
+            }
+        }
+
+        #[cfg(feature = "sync")]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+    }
+
     /// Shared ownership. With the `sync` feature, `Rc` is `Arc`.
     pub mod rc {
         #[cfg(not(feature = "sync"))]
@@ -123,11 +158,17 @@ pub mod collections {
 /// The shared pointer and cell types that appear in the public API, such as
 /// [`story::Story::get_current_choices`] and [`story::Story::set_error_handler`].
 ///
-/// They are `std::rc::Rc` and `core::cell::RefCell` by default. With the `sync`
-/// feature they are `std::sync::Arc` and `atomic_refcell::AtomicRefCell`, so
-/// code that names them through this module builds either way.
+/// By default `Rc` is `std::rc::Rc`, and `RefCell` and `Lock` are both
+/// `core::cell::RefCell`. With the `sync` feature `Rc` is `std::sync::Arc`,
+/// `RefCell` is `atomic_refcell::AtomicRefCell` and `Lock` is
+/// `std::sync::Mutex`, so code that names them through this module builds
+/// either way. [`LockExt::lock_mut`] reaches into a `Lock` in both builds.
 pub mod shared {
-    pub use crate::compat::{cell::RefCell, rc::Rc};
+    pub use crate::compat::{
+        cell::RefCell,
+        lock::{Lock, LockExt},
+        rc::Rc,
+    };
 }
 
 /// I/O traits used by the streaming JSON API.
