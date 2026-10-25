@@ -1480,3 +1480,29 @@ Going.
     assert_eq!("Going.\n", story.continue_maximally()?);
     Ok(())
 }
+
+#[test]
+fn int_division_errors_are_story_errors_test() -> Result<(), StoryError> {
+    let cases = [
+        ("VAR zero = 0\n{1 / zero}", "Attempted to divide by zero."),
+        ("VAR zero = 0\n{1 % zero}", "Attempted to divide by zero."),
+        (
+            "~ temp min = -2147483647 - 1\n{min / -1}",
+            "Arithmetic operation resulted in an overflow.",
+        ),
+        (
+            "~ temp min = -2147483647 - 1\n{min % -1}",
+            "Arithmetic operation resulted in an overflow.",
+        ),
+    ];
+    for (ink, message) in cases {
+        let json = Compiler::new().compile(ink).unwrap();
+        let mut story = Story::new(&json)?;
+        let error = story.continue_maximally().unwrap_err();
+        assert!(
+            matches!(&error, StoryError::InvalidStoryState(m) if m == message),
+            "{ink}: {error:?}"
+        );
+    }
+    Ok(())
+}

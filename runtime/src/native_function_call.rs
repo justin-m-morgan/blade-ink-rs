@@ -611,7 +611,10 @@ impl NativeFunctionCall {
     fn divide_op(&self, params: &[Rc<Value>]) -> Result<Rc<dyn RTObject>, StoryError> {
         match params[0].value {
             ValueType::Int(op1) => match params[1].value {
-                ValueType::Int(op2) => Ok(Rc::new(Value::new::<i32>(op1 / op2))),
+                ValueType::Int(op2) => match op1.checked_div(op2) {
+                    Some(v) => Ok(Rc::new(Value::new::<i32>(v))),
+                    None => Err(int_arithmetic_error(op2)),
+                },
                 _ => Err(StoryError::InvalidStoryState(
                     "Operation not available for type.".to_owned(),
                 )),
@@ -855,7 +858,10 @@ impl NativeFunctionCall {
     fn mod_op(&self, params: &[Rc<Value>]) -> Result<Rc<dyn RTObject>, StoryError> {
         match params[0].value {
             ValueType::Int(op1) => match params[1].value {
-                ValueType::Int(op2) => Ok(Rc::new(Value::new::<i32>(op1 % op2))),
+                ValueType::Int(op2) => match op1.checked_rem(op2) {
+                    Some(v) => Ok(Rc::new(Value::new::<i32>(v))),
+                    None => Err(int_arithmetic_error(op2)),
+                },
                 _ => Err(StoryError::InvalidStoryState(
                     "Operation not available for type.".to_owned(),
                 )),
@@ -1048,4 +1054,15 @@ impl fmt::Display for NativeFunctionCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Native '{:?}'", self.op)
     }
+}
+
+// Integer division/remainder in the reference runtime throws on a zero divisor
+// (and on i32::MIN / -1), aborting Continue(). Report it as a StoryError
+// instead of panicking.
+fn int_arithmetic_error(divisor: i32) -> StoryError {
+    StoryError::InvalidStoryState(if divisor == 0 {
+        "Attempted to divide by zero.".to_owned()
+    } else {
+        "Arithmetic operation resulted in an overflow.".to_owned()
+    })
 }
