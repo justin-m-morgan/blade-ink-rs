@@ -3,6 +3,7 @@ use crate::prelude::*;
 
 use crate::{
     compat::{error::Error, fmt},
+    story::MaybeSendSync,
     value_type::ValueType,
 };
 
@@ -28,13 +29,13 @@ impl Error for ExternalFunctionError {}
 pub type ExternalFunctionResult = Result<Option<ValueType>, ExternalFunctionError>;
 
 /// Defines a callback implementing an external Ink function.
-pub trait ExternalFunction {
+pub trait ExternalFunction: MaybeSendSync {
     fn call(&mut self, func_name: &str, args: &[ValueType]) -> ExternalFunctionResult;
 }
 
 impl<F> ExternalFunction for F
 where
-    F: FnMut(&str, &[ValueType]) -> ExternalFunctionResult,
+    F: FnMut(&str, &[ValueType]) -> ExternalFunctionResult + MaybeSendSync,
 {
     fn call(&mut self, func_name: &str, args: &[ValueType]) -> ExternalFunctionResult {
         self(func_name, args)

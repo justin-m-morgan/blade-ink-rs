@@ -5,7 +5,7 @@ use crate::compat::{
     any::Any,
     cell::RefCell,
     fmt::Display,
-    rc::{Rc, Weak},
+    rc::{Rc, RcAny, Weak},
 };
 
 use as_any::{AsAny, Downcast};
@@ -14,6 +14,7 @@ use crate::{
     container::Container,
     path::{Component, Path},
     search_result::SearchResult,
+    story::MaybeSendSync,
 };
 
 #[derive(Clone)]
@@ -40,7 +41,7 @@ impl Object {
     }
 
     pub fn set_parent(&self, parent: &Rc<Container>) {
-        self.parent.replace(Rc::downgrade(parent));
+        *self.parent.borrow_mut() = Rc::downgrade(parent);
     }
 
     pub fn get_path(rtobject: &dyn RTObject) -> Path {
@@ -87,16 +88,11 @@ impl Object {
                 // Reverse list because components are searched in reverse order.
                 comps.reverse();
 
-                rtobject
-                    .get_object()
-                    .path
-                    .replace(Some(Path::new(&comps, Path::default().is_relative())));
+                *rtobject.get_object().path.borrow_mut() =
+                    Some(Path::new(&comps, Path::default().is_relative()));
             }
             None => {
-                rtobject
-                    .get_object()
-                    .path
-                    .replace(Some(Path::new_with_defaults()));
+                *rtobject.get_object().path.borrow_mut() = Some(Path::new_with_defaults());
             }
         }
 
@@ -209,17 +205,17 @@ impl Default for Object {
 }
 
 pub trait IntoAny: AsAny {
-    fn into_any(self: Rc<Self>) -> Rc<dyn Any>;
+    fn into_any(self: Rc<Self>) -> RcAny;
 }
 
-impl<T: Any> IntoAny for T {
+impl<T: Any + MaybeSendSync> IntoAny for T {
     #[inline(always)]
-    fn into_any(self: Rc<Self>) -> Rc<dyn Any> {
+    fn into_any(self: Rc<Self>) -> RcAny {
         self
     }
 }
 
-pub trait RTObject: Display + IntoAny {
+pub trait RTObject: Display + IntoAny + MaybeSendSync {
     fn get_object(&self) -> &Object;
 }
 

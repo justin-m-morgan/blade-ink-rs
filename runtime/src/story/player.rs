@@ -15,7 +15,7 @@ use crate::{
     story::error::StoryError,
     story::variable_observer::{VariableObserver, VariableObserverHandle, VariableObserverResult},
     story::{
-        INK_VERSION_CURRENT, TimeSource,
+        INK_VERSION_CURRENT, MaybeSendSync, TimeSource,
         error::{ErrorHandler, ErrorType},
         external_functions::{ExternalFunction, ExternalFunctionResult},
     },
@@ -469,7 +469,7 @@ impl Story {
         observer: F,
     ) -> Result<VariableObserverHandle, StoryError>
     where
-        F: FnMut(&str, &ValueType) -> VariableObserverResult + 'static,
+        F: FnMut(&str, &ValueType) -> VariableObserverResult + MaybeSendSync + 'static,
     {
         self.observe_variables(&[name], observer)
     }
@@ -481,7 +481,7 @@ impl Story {
         observer: F,
     ) -> Result<VariableObserverHandle, StoryError>
     where
-        F: FnMut(&str, &ValueType) -> VariableObserverResult + 'static,
+        F: FnMut(&str, &ValueType) -> VariableObserverResult + MaybeSendSync + 'static,
     {
         self.observe_variables_handler(names, observer)
     }
@@ -627,7 +627,7 @@ impl Story {
         lookahead_safe: bool,
     ) -> Result<(), StoryError>
     where
-        F: FnMut(&str, &[ValueType]) -> ExternalFunctionResult + 'static,
+        F: FnMut(&str, &[ValueType]) -> ExternalFunctionResult + MaybeSendSync + 'static,
     {
         self.if_async_we_cant("bind an external function")?;
         self.runtime
@@ -775,15 +775,14 @@ mod tests {
 
     #[test]
     fn story_async_continuation_pauses_and_resumes() {
-        use crate::compat::cell::Cell;
+        use core::sync::atomic::{AtomicU64, Ordering};
 
         let json = r#"{"inkVersion":21,"root":["^one","^two","^three","done",null],"listDefs":{}}"#;
         let mut story = Story::new_with_seed(json, 1).unwrap();
-        let tick = Rc::new(Cell::new(0_u64));
+        let tick = Rc::new(AtomicU64::new(0));
         let clock = tick.clone();
         story.set_time_source(move || {
-            let next = clock.get() + 2;
-            clock.set(next);
+            let next = clock.fetch_add(2, Ordering::Relaxed) + 2;
             core::time::Duration::from_millis(next)
         });
         story.continue_async(1.0).unwrap();
@@ -800,13 +799,13 @@ mod tests {
 
     #[test]
     fn story_rejects_backwards_async_clock() {
-        use crate::compat::cell::Cell;
+        use core::sync::atomic::{AtomicBool, Ordering};
 
         let json = r#"{"inkVersion":21,"root":["^text","done",null],"listDefs":{}}"#;
         let mut story = Story::new_with_seed(json, 1).unwrap();
-        let first = Cell::new(true);
+        let first = AtomicBool::new(true);
         story.set_time_source(move || {
-            if first.replace(false) {
+            if first.swap(false, Ordering::Relaxed) {
                 core::time::Duration::from_millis(2)
             } else {
                 core::time::Duration::from_millis(1)

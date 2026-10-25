@@ -57,7 +57,22 @@ extern crate std;
 
 mod compat {
     #[allow(unused_imports)]
-    pub use core::{any, cell, cmp, convert, error, fmt, hash, mem, ptr, str};
+    pub use core::{any, cmp, convert, error, fmt, hash, mem, ptr, str};
+
+    /// Interior mutability. With the `sync` feature, `RefCell` and
+    /// `OnceCell` become their thread-safe counterparts so a `Story` can be
+    /// sent and shared between threads.
+    pub mod cell {
+        #[cfg(feature = "sync")]
+        #[allow(unused_imports)]
+        pub use atomic_refcell::{
+            AtomicRef as Ref, AtomicRefCell as RefCell, AtomicRefMut as RefMut,
+        };
+        #[allow(unused_imports)]
+        pub use core::cell::*;
+        #[cfg(feature = "sync")]
+        pub use std::sync::OnceLock as OnceCell;
+    }
 
     pub mod collections {
         #[allow(unused_imports)]
@@ -71,9 +86,20 @@ mod compat {
         pub use core3::io::*;
     }
 
+    /// Shared ownership. With the `sync` feature, `Rc` is `Arc`.
     pub mod rc {
+        #[cfg(not(feature = "sync"))]
         #[allow(unused_imports)]
         pub use alloc::rc::*;
+        #[cfg(feature = "sync")]
+        #[allow(unused_imports)]
+        pub use alloc::sync::{Arc as Rc, Weak};
+
+        /// A shared `Any`, as needed to downcast a shared runtime object.
+        #[cfg(not(feature = "sync"))]
+        pub type RcAny = Rc<dyn core::any::Any>;
+        #[cfg(feature = "sync")]
+        pub type RcAny = Rc<dyn core::any::Any + Send + Sync>;
     }
 }
 
@@ -94,6 +120,16 @@ pub mod collections {
     pub use std::collections::{HashMap, HashSet};
 }
 
+/// The shared pointer and cell types that appear in the public API, such as
+/// [`story::Story::get_current_choices`] and [`story::Story::set_error_handler`].
+///
+/// They are `std::rc::Rc` and `core::cell::RefCell` by default. With the `sync`
+/// feature they are `std::sync::Arc` and `atomic_refcell::AtomicRefCell`, so
+/// code that names them through this module builds either way.
+pub mod shared {
+    pub use crate::compat::{cell::RefCell, rc::Rc};
+}
+
 /// I/O traits used by the streaming JSON API.
 pub mod io {
     pub use core3::io::{Read, Write};
@@ -101,11 +137,12 @@ pub mod io {
 
 mod prelude {
     #[allow(unused_imports)]
+    pub use crate::compat::rc::{Rc, Weak};
+    #[allow(unused_imports)]
     pub use alloc::{
         borrow::ToOwned,
         boxed::Box,
         format,
-        rc::{Rc, Weak},
         string::{String, ToString},
         vec,
         vec::Vec,

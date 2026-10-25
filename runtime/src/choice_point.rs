@@ -84,7 +84,7 @@ impl ChoicePoint {
         if self.path_on_choice.borrow().is_relative()
             && let Some(choice_target_obj) = self.get_choice_target()
         {
-            self.path_on_choice.replace(choice_target_obj.get_path());
+            *self.path_on_choice.borrow_mut() = choice_target_obj.get_path();
         }
 
         self.path_on_choice.borrow().clone()

@@ -3,9 +3,8 @@
 //! Supports both plain-text and JSON output modes (`-j`), mirroring the
 //! behaviour of the blade-ink-java `CommandLinePlayer`.
 
-use std::cell::RefCell;
+use bladeink::shared::{Rc, RefCell};
 use std::io::{self, BufRead, Write};
-use std::rc::Rc;
 
 use bladeink::story::{
     Story,
@@ -239,7 +238,7 @@ fn flush_messages(err_handler: &Rc<RefCell<StoryErrors>>, opts: &Options) {
 // JSON helpers
 // ---------------------------------------------------------------------------
 
-fn print_choices_json(choices: &[std::rc::Rc<bladeink::choice::Choice>]) {
+fn print_choices_json(choices: &[Rc<bladeink::choice::Choice>]) {
     let mut parts = Vec::new();
     for c in choices {
         if c.tags.is_empty() {

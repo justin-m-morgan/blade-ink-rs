@@ -74,7 +74,7 @@ impl fmt::Display for StoryError {
 }
 
 /// Receives runtime errors and warnings while playing a story.
-pub trait ErrorHandler {
+pub trait ErrorHandler: super::MaybeSendSync {
     fn error(&mut self, message: &str, error_type: ErrorType);
 }
 
