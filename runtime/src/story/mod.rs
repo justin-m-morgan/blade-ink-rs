@@ -5,6 +5,14 @@ mod player;
 pub use player::LoadProfile;
 pub use player::{ChoiceInfo, Story};
 
+// With `sync`, a `Story` must stay `Send + Sync`; this fails the build if a
+// change makes it lose either.
+#[cfg(feature = "sync")]
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Story>();
+};
+
 pub mod error;
 pub mod external_functions;
 pub mod variable_observer;

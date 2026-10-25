@@ -70,8 +70,60 @@ mod compat {
         };
         #[allow(unused_imports)]
         pub use core::cell::*;
-        #[cfg(feature = "sync")]
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        pub use spin_once::OnceCell;
+        #[cfg(all(feature = "sync", feature = "std"))]
         pub use std::sync::OnceLock as OnceCell;
+
+        /// The parts of `OnceLock`'s API the runtime uses, over `spin::Once`
+        /// for `sync` builds without `std`.
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        mod spin_once {
+            pub struct OnceCell<T>(spin::Once<T>);
+
+            impl<T> OnceCell<T> {
+                pub const fn new() -> Self {
+                    Self(spin::Once::new())
+                }
+
+                pub fn get(&self) -> Option<&T> {
+                    self.0.get()
+                }
+
+                pub fn get_or_init(&self, f: impl FnOnce() -> T) -> &T {
+                    self.0.call_once(f)
+                }
+
+                pub fn set(&self, value: T) -> Result<(), T> {
+                    let mut value = Some(value);
+                    self.0.call_once(|| value.take().unwrap());
+                    value.map_or(Ok(()), Err)
+                }
+            }
+
+            impl<T> Default for OnceCell<T> {
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+
+            impl<T: Clone> Clone for OnceCell<T> {
+                fn clone(&self) -> Self {
+                    match self.get() {
+                        Some(value) => Self(spin::Once::initialized(value.clone())),
+                        None => Self::new(),
+                    }
+                }
+            }
+
+            impl<T: PartialEq> PartialEq for OnceCell<T> {
+                fn eq(&self, other: &Self) -> bool {
+                    self.get() == other.get()
+                }
+            }
+
+            impl<T: Eq> Eq for OnceCell<T> {}
+        }
     }
 
     pub mod collections {
@@ -88,20 +140,24 @@ mod compat {
 
     /// Exclusive access that blocks on contention instead of panicking, for
     /// state reached through `&self` or shared with the caller. It is
-    /// `RefCell` by default and `std::sync::Mutex` with the `sync` feature.
+    /// `RefCell` by default. With the `sync` feature it is `std::sync::Mutex`,
+    /// or `spin::Mutex` when `std` is off.
     pub mod lock {
         use core::ops::DerefMut;
 
         #[cfg(not(feature = "sync"))]
         pub use core::cell::RefCell as Lock;
-        #[cfg(feature = "sync")]
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        pub use spin::Mutex as Lock;
+        #[cfg(all(feature = "sync", feature = "std"))]
         pub use std::sync::Mutex as Lock;
 
         /// Exclusive access to a [`Lock`], whichever type it is.
         pub trait LockExt<T: ?Sized> {
             /// Borrows the value mutably. Without `sync` this panics if it
-            /// is already borrowed; with `sync` it waits for the lock, and
-            /// ignores poisoning left by a panic in another thread.
+            /// is already borrowed. With `sync` it waits for the lock: it
+            /// ignores poisoning left by a panic in another thread, and
+            /// without `std` it spins rather than sleeping.
             fn lock_mut(&self) -> impl DerefMut<Target = T> + '_;
         }
 
@@ -112,11 +168,18 @@ mod compat {
             }
         }
 
-        #[cfg(feature = "sync")]
+        #[cfg(all(feature = "sync", feature = "std"))]
         impl<T: ?Sized> LockExt<T> for Lock<T> {
             fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
                 self.lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.lock()
             }
         }
     }
@@ -161,8 +224,9 @@ pub mod collections {
 /// By default `Rc` is `std::rc::Rc`, and `RefCell` and `Lock` are both
 /// `core::cell::RefCell`. With the `sync` feature `Rc` is `std::sync::Arc`,
 /// `RefCell` is `atomic_refcell::AtomicRefCell` and `Lock` is
-/// `std::sync::Mutex`, so code that names them through this module builds
-/// either way. [`LockExt::lock_mut`] reaches into a `Lock` in both builds.
+/// `std::sync::Mutex` (`spin::Mutex` without `std`), so code that names them
+/// through this module builds either way. [`LockExt::lock_mut`] reaches into
+/// a `Lock` in every build.
 pub mod shared {
     pub use crate::compat::{
         cell::RefCell,

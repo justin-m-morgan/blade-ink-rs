@@ -30,6 +30,7 @@ hashbrown = "0.16"
 libm = "0.2"
 core3 = { version = "0.1", default-features = false, features = ["alloc"] }
 atomic_refcell = { version = "0.1", optional = true }
+spin = { version = "0.12", default-features = false, features = ["spin_mutex", "once"], optional = true }
 
 [features]
 default = ["std", "serde-json-parser"]
@@ -38,7 +39,7 @@ serde-json-parser = ["dep:serde_json"]
 stream-json-parser = []
 load-profile = ["std"]
 binary-image = []
-sync = ["std", "dep:atomic_refcell"]
+sync = ["dep:atomic_refcell", "dep:spin"]
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"], optional = true }

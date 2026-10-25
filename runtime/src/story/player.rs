@@ -778,15 +778,15 @@ mod tests {
 
     #[test]
     fn story_async_continuation_pauses_and_resumes() {
-        use core::sync::atomic::{AtomicU64, Ordering};
+        use core::sync::atomic::{AtomicU32, Ordering};
 
         let json = r#"{"inkVersion":21,"root":["^one","^two","^three","done",null],"listDefs":{}}"#;
         let mut story = Story::new_with_seed(json, 1).unwrap();
-        let tick = Rc::new(AtomicU64::new(0));
+        let tick = Rc::new(AtomicU32::new(0));
         let clock = tick.clone();
         story.set_time_source(move || {
             let next = clock.fetch_add(2, Ordering::Relaxed) + 2;
-            core::time::Duration::from_millis(next)
+            core::time::Duration::from_millis(next.into())
         });
         story.continue_async(1.0).unwrap();
         assert!(story.is_async_continue_active());
