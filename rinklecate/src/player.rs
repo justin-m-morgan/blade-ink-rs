@@ -3,9 +3,8 @@
 //! Supports both plain-text and JSON output modes (`-j`), mirroring the
 //! behaviour of the blade-ink-java `CommandLinePlayer`.
 
-use std::cell::RefCell;
+use bladeink::shared::{Lock, LockExt, Rc};
 use std::io::{self, BufRead, Write};
-use std::rc::Rc;
 
 use bladeink::story::{
     Story,
@@ -24,8 +23,8 @@ struct StoryErrors {
 }
 
 impl StoryErrors {
-    fn new() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
+    fn new() -> Rc<Lock<Self>> {
+        Rc::new(Lock::new(Self {
             errors: Vec::new(),
             warnings: Vec::new(),
         }))
@@ -178,7 +177,7 @@ pub fn play(mut story: Story, opts: &Options) -> anyhow::Result<()> {
 
 fn evaluate_story(
     story: &mut Story,
-    err_handler: &Rc<RefCell<StoryErrors>>,
+    err_handler: &Rc<Lock<StoryErrors>>,
     opts: &Options,
 ) -> anyhow::Result<()> {
     while story.can_continue() {
@@ -210,8 +209,8 @@ fn evaluate_story(
     Ok(())
 }
 
-fn flush_messages(err_handler: &Rc<RefCell<StoryErrors>>, opts: &Options) {
-    let mut h = err_handler.borrow_mut();
+fn flush_messages(err_handler: &Rc<Lock<StoryErrors>>, opts: &Options) {
+    let mut h = err_handler.lock_mut();
     if h.errors.is_empty() && h.warnings.is_empty() {
         return;
     }
@@ -239,7 +238,7 @@ fn flush_messages(err_handler: &Rc<RefCell<StoryErrors>>, opts: &Options) {
 // JSON helpers
 // ---------------------------------------------------------------------------
 
-fn print_choices_json(choices: &[std::rc::Rc<bladeink::choice::Choice>]) {
+fn print_choices_json(choices: &[Rc<bladeink::choice::Choice>]) {
     let mut parts = Vec::new();
     for c in choices {
         if c.tags.is_empty() {

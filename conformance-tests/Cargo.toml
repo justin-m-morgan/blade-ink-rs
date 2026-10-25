@@ -12,3 +12,4 @@ serde_json.workspace = true
 
 [features]
 binary-image = ["bladeink/binary-image"]
+sync = ["bladeink/sync"]

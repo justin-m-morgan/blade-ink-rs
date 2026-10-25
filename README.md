@@ -54,6 +54,7 @@ The default configuration remains `std` with the Serde JSON backend. The availab
 | `std`, `stream-json-parser` | Yes | Incremental JSON I/O on standard-library targets |
 | `stream-json-parser` without defaults | Yes | `no_std + alloc`; an allocator is required |
 | `binary-image` without defaults | Yes | `no_std + alloc`; reads embedded images and retains the JSON saved-state codec |
+| `sync`, with any of the above | Yes | `Story` is `Send + Sync`; see [Thread safety](#thread-safety-sync) |
 | `serde-json-parser` without `std` | No | Produces a compile-time error |
 
 For `no_std` targets that load JSON stories, disable defaults and enable the streaming backend:
@@ -80,6 +81,28 @@ bladeink = { version = "2", default-features = false, features = ["std", "stream
 ```
 
 For image generation, embedding, format details and host memory measurements, see the [binary story image guide](docs/flash-story-image.md).
+
+### Thread safety (`sync`)
+
+By default a `Story` is built on `Rc` and `RefCell` and stays on one thread. The `sync` feature makes it `Send + Sync`, so it can be moved to another thread or shared between threads, for example as a component in an ECS game engine:
+
+```toml
+bladeink = { version = "2", features = ["sync"] }
+```
+
+- Methods that take `&self`, such as `get_current_choices`, can be called from several threads at once. Methods that change the story still take `&mut self`.
+- External functions, variable observers, error handlers and time sources must be `Send + Sync`.
+- The pointer and cell types in the public API change: `Rc` becomes `Arc`, `RefCell` becomes `atomic_refcell::AtomicRefCell`, and the error handler is held in a `Lock` (`std::sync::Mutex`, or `spin::Mutex` without `std`). Naming them through `bladeink::shared` keeps the same code building with or without the feature. Cargo unifies features, so `sync` enabled by any crate in a build applies to all of them.
+- `sync` works without `std` on targets with atomic compare-and-swap, and is checked on `thumbv7em-none-eabihf`.
+
+```rust
+use bladeink::shared::{Lock, LockExt, Rc};
+
+let handler = Rc::new(Lock::new(MyErrorHandler::default()));
+story.set_error_handler(handler.clone());
+// ...
+println!("{} errors", handler.lock_mut().errors.len());
+```
 
 ## Using the `bladeink-compiler` crate
 

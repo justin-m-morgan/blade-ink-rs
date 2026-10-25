@@ -129,8 +129,7 @@ impl Divert {
         };
 
         if let Some(container) = &pointer.container {
-            self.target_cache
-                .replace(Some((Rc::downgrade(container), pointer.index)));
+            *self.target_cache.borrow_mut() = Some((Rc::downgrade(container), pointer.index));
         }
 
         pointer
@@ -147,7 +146,7 @@ impl Divert {
 
                     if let Some(target_obj) = target_obj {
                         let resolved = Object::get_path(target_obj.as_ref());
-                        self.target_path.replace(Some(resolved.clone()));
+                        *self.target_path.borrow_mut() = Some(resolved.clone());
                         return Some(resolved);
                     }
                 }

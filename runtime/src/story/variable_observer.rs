@@ -3,6 +3,7 @@ use crate::prelude::*;
 
 use crate::{
     compat::{error::Error, fmt},
+    story::MaybeSendSync,
     value_type::ValueType,
 };
 
@@ -27,13 +28,13 @@ impl Error for VariableObserverError {}
 pub type VariableObserverResult = Result<(), VariableObserverError>;
 
 /// Defines a callback invoked when an observed global variable changes.
-pub trait VariableObserver {
+pub trait VariableObserver: MaybeSendSync {
     fn changed(&mut self, variable_name: &str, value: &ValueType) -> VariableObserverResult;
 }
 
 impl<F> VariableObserver for F
 where
-    F: FnMut(&str, &ValueType) -> VariableObserverResult,
+    F: FnMut(&str, &ValueType) -> VariableObserverResult + MaybeSendSync,
 {
     fn changed(&mut self, variable_name: &str, value: &ValueType) -> VariableObserverResult {
         self(variable_name, value)

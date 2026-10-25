@@ -57,7 +57,74 @@ extern crate std;
 
 mod compat {
     #[allow(unused_imports)]
-    pub use core::{any, cell, cmp, convert, error, fmt, hash, mem, ptr, str};
+    pub use core::{any, cmp, convert, error, fmt, hash, mem, ptr, str};
+
+    /// Interior mutability. With the `sync` feature, `RefCell` and
+    /// `OnceCell` become their thread-safe counterparts so a `Story` can be
+    /// sent and shared between threads.
+    pub mod cell {
+        #[cfg(feature = "sync")]
+        #[allow(unused_imports)]
+        pub use atomic_refcell::{
+            AtomicRef as Ref, AtomicRefCell as RefCell, AtomicRefMut as RefMut,
+        };
+        #[allow(unused_imports)]
+        pub use core::cell::*;
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        pub use spin_once::OnceCell;
+        #[cfg(all(feature = "sync", feature = "std"))]
+        pub use std::sync::OnceLock as OnceCell;
+
+        /// The parts of `OnceLock`'s API the runtime uses, over `spin::Once`
+        /// for `sync` builds without `std`.
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        mod spin_once {
+            pub struct OnceCell<T>(spin::Once<T>);
+
+            impl<T> OnceCell<T> {
+                pub const fn new() -> Self {
+                    Self(spin::Once::new())
+                }
+
+                pub fn get(&self) -> Option<&T> {
+                    self.0.get()
+                }
+
+                pub fn get_or_init(&self, f: impl FnOnce() -> T) -> &T {
+                    self.0.call_once(f)
+                }
+
+                pub fn set(&self, value: T) -> Result<(), T> {
+                    let mut value = Some(value);
+                    self.0.call_once(|| value.take().unwrap());
+                    value.map_or(Ok(()), Err)
+                }
+            }
+
+            impl<T> Default for OnceCell<T> {
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+
+            impl<T: Clone> Clone for OnceCell<T> {
+                fn clone(&self) -> Self {
+                    match self.get() {
+                        Some(value) => Self(spin::Once::initialized(value.clone())),
+                        None => Self::new(),
+                    }
+                }
+            }
+
+            impl<T: PartialEq> PartialEq for OnceCell<T> {
+                fn eq(&self, other: &Self) -> bool {
+                    self.get() == other.get()
+                }
+            }
+
+            impl<T: Eq> Eq for OnceCell<T> {}
+        }
+    }
 
     pub mod collections {
         #[allow(unused_imports)]
@@ -71,9 +138,66 @@ mod compat {
         pub use core3::io::*;
     }
 
+    /// Exclusive access that blocks on contention instead of panicking, for
+    /// state reached through `&self` or shared with the caller. It is
+    /// `RefCell` by default. With the `sync` feature it is `std::sync::Mutex`,
+    /// or `spin::Mutex` when `std` is off.
+    pub mod lock {
+        use core::ops::DerefMut;
+
+        #[cfg(not(feature = "sync"))]
+        pub use core::cell::RefCell as Lock;
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        pub use spin::Mutex as Lock;
+        #[cfg(all(feature = "sync", feature = "std"))]
+        pub use std::sync::Mutex as Lock;
+
+        /// Exclusive access to a [`Lock`], whichever type it is.
+        pub trait LockExt<T: ?Sized> {
+            /// Borrows the value mutably. Without `sync` this panics if it
+            /// is already borrowed. With `sync` it waits for the lock: it
+            /// ignores poisoning left by a panic in another thread, and
+            /// without `std` it spins rather than sleeping.
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_;
+        }
+
+        #[cfg(not(feature = "sync"))]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.borrow_mut()
+            }
+        }
+
+        #[cfg(all(feature = "sync", feature = "std"))]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            }
+        }
+
+        #[cfg(all(feature = "sync", not(feature = "std")))]
+        impl<T: ?Sized> LockExt<T> for Lock<T> {
+            fn lock_mut(&self) -> impl DerefMut<Target = T> + '_ {
+                self.lock()
+            }
+        }
+    }
+
+    /// Shared ownership. With the `sync` feature, `Rc` is `Arc`.
     pub mod rc {
+        #[cfg(not(feature = "sync"))]
         #[allow(unused_imports)]
         pub use alloc::rc::*;
+        #[cfg(feature = "sync")]
+        #[allow(unused_imports)]
+        pub use alloc::sync::{Arc as Rc, Weak};
+
+        /// A shared `Any`, as needed to downcast a shared runtime object.
+        #[cfg(not(feature = "sync"))]
+        pub type RcAny = Rc<dyn core::any::Any>;
+        #[cfg(feature = "sync")]
+        pub type RcAny = Rc<dyn core::any::Any + Send + Sync>;
     }
 }
 
@@ -94,6 +218,23 @@ pub mod collections {
     pub use std::collections::{HashMap, HashSet};
 }
 
+/// The shared pointer and cell types that appear in the public API, such as
+/// [`story::Story::get_current_choices`] and [`story::Story::set_error_handler`].
+///
+/// By default `Rc` is `std::rc::Rc`, and `RefCell` and `Lock` are both
+/// `core::cell::RefCell`. With the `sync` feature `Rc` is `std::sync::Arc`,
+/// `RefCell` is `atomic_refcell::AtomicRefCell` and `Lock` is
+/// `std::sync::Mutex` (`spin::Mutex` without `std`), so code that names them
+/// through this module builds either way. [`LockExt::lock_mut`] reaches into
+/// a `Lock` in every build.
+pub mod shared {
+    pub use crate::compat::{
+        cell::RefCell,
+        lock::{Lock, LockExt},
+        rc::Rc,
+    };
+}
+
 /// I/O traits used by the streaming JSON API.
 pub mod io {
     pub use core3::io::{Read, Write};
@@ -101,11 +242,12 @@ pub mod io {
 
 mod prelude {
     #[allow(unused_imports)]
+    pub use crate::compat::rc::{Rc, Weak};
+    #[allow(unused_imports)]
     pub use alloc::{
         borrow::ToOwned,
         boxed::Box,
         format,
-        rc::{Rc, Weak},
         string::{String, ToString},
         vec,
         vec::Vec,

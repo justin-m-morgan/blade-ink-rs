@@ -280,7 +280,7 @@ pub fn write_choice(choice: &Choice) -> serde_json::Value {
     jobj.insert("originalChoicePath".to_owned(), json!(choice.source_path));
     jobj.insert(
         "originalThreadIndex".to_owned(),
-        json!(choice.original_thread_index),
+        json!(*choice.original_thread_index.borrow()),
     );
     jobj.insert(
         "targetPath".to_owned(),

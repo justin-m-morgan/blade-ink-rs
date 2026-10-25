@@ -26,13 +26,16 @@ jobs:
         cargo clippy --workspace --all-targets --all-features -- -D warnings
         cargo clippy -p bladeink --lib --no-default-features --features stream-json-parser -- -D warnings
     - name: Check no_std target
-      run: cargo check -p bladeink --lib --no-default-features --features stream-json-parser --target thumbv7em-none-eabihf
+      run: |
+        cargo check -p bladeink --lib --no-default-features --features stream-json-parser --target thumbv7em-none-eabihf
+        cargo check -p bladeink --lib --no-default-features --features stream-json-parser,sync --target thumbv7em-none-eabihf
     - name: Test
       run: |
         cargo test
         cargo test -p bladeink --features stream-json-parser
         cargo test -p bladeink --no-default-features --features stream-json-parser
         cargo test -p conformance-tests --features bladeink/stream-json-parser
+        cargo test --workspace --features bladeink/sync,conformance-tests/sync
 
   upload-rinklecate:
     needs: check

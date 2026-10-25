@@ -107,7 +107,7 @@ impl InkList {
     }
 
     pub fn set_initial_origin_names(&self, initial_origin_names: Vec<String>) {
-        self.initial_origin_names.replace(initial_origin_names);
+        *self.initial_origin_names.borrow_mut() = initial_origin_names;
     }
 
     pub fn get_origin_names(&self) -> Vec<String> {
